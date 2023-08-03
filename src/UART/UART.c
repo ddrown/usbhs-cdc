@@ -12,6 +12,7 @@
 
 #include <stdint.h>
 #include "UART.h"
+#include "ch32v30x_it.h"
 
 /*******************************************************************************/
 /* Variable Definition */
@@ -415,6 +416,30 @@ void write_usb_data(uint32_t buf, uint16_t len) {
     NVIC_EnableIRQ( USBHS_IRQn );
 }
 
+static uint8_t at_newline = 0;
+static char pps_stats[DEF_USBD_HS_PACK_SIZE];
+void check_pps_output() {
+    static uint32_t last_count = 0;
+
+    if( Uart.USB_Up_IngFlag == 0 && pendingPPS && at_newline) {
+        uint16_t irq_ch1 = cap_count % 0x10000;
+        int32_t difference = irq_ch1-cap_ch1;
+        uint32_t longcount;
+
+        // did tim1 wrap between capture and irq?
+        if (difference < 0)
+            difference += 0x10000;
+
+        longcount = cap_count - difference;
+
+        snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "m=%u cm=%u c1=%u cL=%u d=%u\r\n", micros, cap_micros, cap_ch1, longcount, longcount - last_count);
+        write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
+
+        pendingPPS = 0;
+        last_count = longcount;
+    }
+}
+
 /*********************************************************************
  * @fn      UART2_DataRx_Deal
  *
@@ -480,6 +505,7 @@ void UART2_DataRx_Deal( void )
             /* Upload serial data via usb */
             if( packlen ) {
               write_usb_data((uint32_t)&UART2_Rx_Buf[ Uart.Rx_DealPtr ], packlen);
+              at_newline = UART2_Rx_Buf[Uart.Rx_DealPtr + packlen - 1] == '\n';
 
               /* Calculate the variables of interest */
               Uart.Rx_RemainLen -= packlen;
@@ -526,5 +552,7 @@ void UART2_DataRx_Deal( void )
                 Uart.USB_Up_Pack0_Flag = 0x00;
             }
         }
+    } else {
+      check_pps_output();
     }
 }

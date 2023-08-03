@@ -20,6 +20,7 @@
 
 #include "UART.h"
 #include "debug.h"
+#include "timer.h"
 
 /*********************************************************************
  * @fn      main
@@ -40,6 +41,7 @@ int main(void)
 
 	/* Tim7 init */
 	TIM7_Init( );
+        TIM1_Init();
 
 	/* Usart2 init */
 	UART2_Init( 1, DEF_UARTx_BAUDRATE, DEF_UARTx_STOPBIT, DEF_UARTx_PARITY );
