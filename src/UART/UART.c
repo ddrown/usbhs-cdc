@@ -188,7 +188,7 @@ void UART2_ParaInit( uint8_t mode )
     Uart.Rx_DealPtr = 0x00;
     Uart.Rx_RemainLen = 0x00;
     Uart.Rx_TimeOut = 0x00;
-    Uart.Rx_TimeOutMax = 30;
+    Uart.Rx_TimeOutMax = 100; // 10ms
 
     Uart.Tx_LoadNum = 0x00;
     Uart.Tx_DealNum = 0x00;
@@ -403,6 +403,18 @@ void UART2_DataTx_Deal( void )
     }
 }
 
+void write_usb_data(uint32_t buf, uint16_t len) {
+    NVIC_DisableIRQ( USBHS_IRQn );
+    NVIC_DisableIRQ( USBHS_IRQn );
+    Uart.USB_Up_IngFlag = 0x01;
+    Uart.USB_Up_TimeOut = 0x00;
+    USBHSD->UEP2_TX_DMA = buf;
+    USBHSD->UEP2_TX_LEN  = len;
+    USBHSD->UEP2_TX_CTRL &= ~USBHS_UEP_T_RES_MASK;
+    USBHSD->UEP2_TX_CTRL |= USBHS_UEP_T_RES_ACK;
+    NVIC_EnableIRQ( USBHS_IRQn );
+}
+
 /*********************************************************************
  * @fn      UART2_DataRx_Deal
  *
@@ -417,36 +429,30 @@ void UART2_DataRx_Deal( void )
     uint16_t packlen;
 
     /* Serial port 1 data DMA receive processing */
-    NVIC_DisableIRQ( USBHS_IRQn );
-    NVIC_DisableIRQ( USBHS_IRQn );
     UARTx_Rx_DMACurCount = DEF_UART2_RX_DMA_CH->CNTR;
-    if( UARTx_Rx_DMALastCount != UARTx_Rx_DMACurCount )
-    {
-        if( UARTx_Rx_DMALastCount > UARTx_Rx_DMACurCount )
-        {
+    if( UARTx_Rx_DMALastCount != UARTx_Rx_DMACurCount ) {
+        if (Uart.Rx_RemainLen == 0)
+            Uart.Rx_TimeOut = 0x00; // start the 10ms timeout from the first byte
+
+        if( UARTx_Rx_DMALastCount > UARTx_Rx_DMACurCount ) {
             temp16 = UARTx_Rx_DMALastCount - UARTx_Rx_DMACurCount;
-        }
-        else
-        {
+        } else {
             temp16 = DEF_UARTx_RX_BUF_LEN - UARTx_Rx_DMACurCount;
             temp16 += UARTx_Rx_DMALastCount;
         }
         UARTx_Rx_DMALastCount = UARTx_Rx_DMACurCount;
-        if( ( Uart.Rx_RemainLen + temp16 ) > DEF_UARTx_RX_BUF_LEN )
-        {
+        if( ( Uart.Rx_RemainLen + temp16 ) > DEF_UARTx_RX_BUF_LEN ) {
             /* Overflow handling */
             /* Save frame error status */
-            DUG_PRINTF("U0_O:%08lx\n",(uint32_t)Uart.Rx_RemainLen);
-        }
-        else
-        {
+            DUG_PRINTF("overflow %u\r\n",(uint32_t)Uart.Rx_RemainLen);
+            // we probably had a buffer full condition due to the host not polling
+            // get back in sync with where the DMA is pointing
+            Uart.Rx_RemainLen = 0;
+            Uart.Rx_DealPtr = DEF_UARTx_RX_BUF_LEN - UARTx_Rx_DMACurCount;
+        } else {
             Uart.Rx_RemainLen += temp16;
         }
-
-        /* Setting reception status */
-        Uart.Rx_TimeOut = 0x00;
     }
-    NVIC_EnableIRQ( USBHS_IRQn );
 
     /*****************************************************************/
     /* Serial port 1 data processing via USB upload and reception */
@@ -457,57 +463,45 @@ void UART2_DataRx_Deal( void )
             /* Calculate the length of this upload */
             remain_len = Uart.Rx_RemainLen;
             packlen = 0x00;
-            if( remain_len >= DEF_USBD_HS_PACK_SIZE )
-            {
+
+            // do we have a full packet?
+            if( remain_len >= DEF_USBD_HS_PACK_SIZE ) {
                 packlen = DEF_USBD_HS_PACK_SIZE;
-            }
-            else
-            {
-                if( Uart.Rx_TimeOut >= Uart.Rx_TimeOutMax )
-                {
+            } else { // have we buffered this data for longer than timeoutmax?
+                if( Uart.Rx_TimeOut >= Uart.Rx_TimeOutMax ) {
                     packlen = remain_len;
                 }
             }
-            if( packlen > ( DEF_UARTx_RX_BUF_LEN - Uart.Rx_DealPtr ) )
-            {
+            // did we hit the end of the circular buffer? send just part
+            if( packlen > ( DEF_UARTx_RX_BUF_LEN - Uart.Rx_DealPtr ) ) {
                 packlen = ( DEF_UARTx_RX_BUF_LEN - Uart.Rx_DealPtr );
             }
 
             /* Upload serial data via usb */
-            if( packlen )
-            {
-                NVIC_DisableIRQ( USBHS_IRQn );
-                NVIC_DisableIRQ( USBHS_IRQn );
-                Uart.USB_Up_IngFlag = 0x01;
-                Uart.USB_Up_TimeOut = 0x00;
-                USBHSD->UEP2_TX_DMA = (uint32_t)(uint8_t *)&UART2_Rx_Buf[ Uart.Rx_DealPtr ];
-                USBHSD->UEP2_TX_LEN  = packlen;
-                USBHSD->UEP2_TX_CTRL &= ~USBHS_UEP_T_RES_MASK;
-                USBHSD->UEP2_TX_CTRL |= USBHS_UEP_T_RES_ACK;
-                NVIC_EnableIRQ( USBHS_IRQn );
+            if( packlen ) {
+              write_usb_data((uint32_t)&UART2_Rx_Buf[ Uart.Rx_DealPtr ], packlen);
 
-                /* Calculate the variables of interest */
-                Uart.Rx_RemainLen -= packlen;
-                Uart.Rx_DealPtr += packlen;
-                if( Uart.Rx_DealPtr >= DEF_UARTx_RX_BUF_LEN )
-                {
-                    Uart.Rx_DealPtr = 0x00;
-                }
+              /* Calculate the variables of interest */
+              Uart.Rx_RemainLen -= packlen;
+              Uart.Rx_DealPtr += packlen;
+              // did we write to the end of the buffer? circle back to the beginning
+              if( Uart.Rx_DealPtr >= DEF_UARTx_RX_BUF_LEN ) {
+                Uart.Rx_DealPtr = 0x00;
+              }
 
-                /* Start 0-length packet timeout timer */
-                if( packlen == DEF_USBD_HS_PACK_SIZE )
-                {
-                    Uart.USB_Up_Pack0_Flag = 0x01;
-                }
+              /* Start 0-length packet timeout timer */
+              if( packlen == DEF_USBD_HS_PACK_SIZE ) {
+                Uart.USB_Up_Pack0_Flag = 0x01;
+              }
             }
-        }
-        else
-        {
-            /* Set the upload success flag directly if the upload is not successful after the timeout */
-            if( Uart.USB_Up_TimeOut >= DEF_UARTx_USB_UP_TIMEOUT )
-            {
+        } else {
+            // if we are not being polled by the USB host, pretend like we wrote everything
+            if( Uart.USB_Up_TimeOut >= DEF_UARTx_USB_UP_TIMEOUT ) {
                 Uart.USB_Up_IngFlag = 0x00;
                 USBHS_Endp_Busy[ DEF_UEP2 ] = 0;
+                // drop the buffer and get back in sync with DMA
+                Uart.Rx_RemainLen = 0;
+                Uart.Rx_DealPtr = DEF_UARTx_RX_BUF_LEN - UARTx_Rx_DMACurCount;
             }
         }
     }
