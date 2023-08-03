@@ -10,6 +10,7 @@
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 
+#include <stdint.h>
 #include "UART.h"
 
 /*******************************************************************************/
@@ -35,43 +36,43 @@ uint8_t RCC_Configuration( void )
 {
     RCC_APB2PeriphClockCmd( RCC_APB2Periph_GPIOA, ENABLE );
     RCC_APB1PeriphClockCmd( RCC_APB1Periph_USART2, ENABLE );
-    RCC_APB1PeriphClockCmd( RCC_APB1Periph_TIM2, ENABLE );
+    RCC_APB1PeriphClockCmd( RCC_APB1Periph_TIM7, ENABLE );
     RCC_AHBPeriphClockCmd( RCC_AHBPeriph_DMA1, ENABLE );
     return 0;
 }
 
 /*********************************************************************
- * @fn      TIM2_Init
+ * @fn      TIM7_Init
  *
  * @brief   100us Timer
- *          144 * 100 * 13.8888 -----> 100uS
+ *          144 (prescaler) * 100 (period) * 6.944 (ns/cycle) -----> 100uS
  *
  * @return  none
  */
-void TIM2_Init( void )
+void TIM7_Init( void )
 {
     TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure = {0};
 
-    TIM_DeInit( TIM2 );
+    TIM_DeInit( TIM7 );
 
     /* Time base configuration */
     TIM_TimeBaseStructure.TIM_Period = 100 - 1;
     TIM_TimeBaseStructure.TIM_Prescaler = SystemCoreClock / 1000000 - 1;
     TIM_TimeBaseStructure.TIM_ClockDivision = 0;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    TIM_TimeBaseInit( TIM2, &TIM_TimeBaseStructure );
+    TIM_TimeBaseInit( TIM7, &TIM_TimeBaseStructure );
 
-    /* Clear TIM2 update pending flag */
-    TIM_ClearFlag( TIM2, TIM_FLAG_Update );
+    /* Clear TIM7 update pending flag */
+    TIM_ClearFlag( TIM7, TIM_FLAG_Update );
 
     /* TIM IT enable */
-    TIM_ITConfig( TIM2, TIM_IT_Update, ENABLE );
+    TIM_ITConfig( TIM7, TIM_IT_Update, ENABLE );
 
     /* Enable Interrupt */
-    NVIC_EnableIRQ( TIM2_IRQn );
+    NVIC_EnableIRQ( TIM7_IRQn );
 
-    /* TIM2 enable counter */
-    TIM_Cmd( TIM2, ENABLE );
+    /* TIM7 enable counter */
+    TIM_Cmd( TIM7, ENABLE );
 }
 
 /*********************************************************************

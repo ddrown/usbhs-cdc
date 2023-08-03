@@ -89,7 +89,7 @@ extern __attribute__ ((aligned(4))) uint8_t UART2_Rx_Buf[ DEF_UARTx_RX_BUF_LEN ]
 /***********************************************************************************************************************/
 /* Function extensibility */
 extern uint8_t RCC_Configuration( void );
-extern void TIM2_Init( void );
+extern void TIM7_Init( void );
 extern void UART2_CfgInit( uint32_t baudrate, uint8_t stopbits, uint8_t parity ); /* UART1 initialization */
 extern void UART2_ParaInit( uint8_t mode );                                       /* Serial port parameter initialization */
 extern void UART2_DMAInit( uint8_t type, uint8_t *pbuf, uint32_t len );           /* Serial port 1-related DMA initialization */

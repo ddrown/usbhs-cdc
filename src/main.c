@@ -38,8 +38,8 @@ int main(void)
 	printf( "Simulate USB-CDC Device running on USBHS Controller\r\n" );
 	RCC_Configuration( );
 
-	/* Tim2 init */
-	TIM2_Init( );
+	/* Tim7 init */
+	TIM7_Init( );
 
 	/* Usart2 init */
 	UART2_Init( 1, DEF_UARTx_BAUDRATE, DEF_UARTx_STOPBIT, DEF_UARTx_PARITY );
