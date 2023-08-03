@@ -29,30 +29,28 @@
  *
  * @return  none
  */
-int main(void)
-{
-	SystemCoreClockUpdate( );
-	Delay_Init( );
-	USART_Printf_Init( 115200 );
-		
-	printf( "SystemClk:%d\r\n", SystemCoreClock );
-	printf( "Simulate USB-CDC Device running on USBHS Controller\r\n" );
-	RCC_Configuration( );
+int main(void) {
+    SystemCoreClockUpdate( );
+    Delay_Init( );
+    USART_Printf_Init( 115200 );
 
-	/* Tim7 init */
-	TIM7_Init( );
-        TIM1_Init();
+    printf( "SystemClk:%d\r\n", SystemCoreClock );
+    printf( "Simulate USB-CDC Device running on USBHS Controller\r\n" );
+    RCC_Configuration( );
 
-	/* Usart2 init */
-	UART2_Init( 1, DEF_UARTx_BAUDRATE, DEF_UARTx_STOPBIT, DEF_UARTx_PARITY );
+    /* Tim7 init */
+    TIM7_Init( );
+    TIM1_Init();
 
-	/* USB20 device init */
-	USBHS_RCC_Init( );
-	USBHS_Device_Init( ENABLE );
+    /* Usart2 init */
+    UART2_Init( 1, DEF_UARTx_BAUDRATE, DEF_UARTx_STOPBIT, DEF_UARTx_PARITY );
 
-	while(1)
-	{
-		UART2_DataRx_Deal( );
-		UART2_DataTx_Deal( );
-	}
+    /* USB20 device init */
+    USBHS_RCC_Init( );
+    USBHS_Device_Init( ENABLE );
+
+    while(1) {
+        UART2_DataRx_Deal( );
+        UART2_DataTx_Deal( );
+    }
 }
