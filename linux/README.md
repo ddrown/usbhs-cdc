@@ -1,0 +1,1 @@
+This is the Linux built-in USB cdc-acm driver from v6.3. It uses the GPL-2 license.

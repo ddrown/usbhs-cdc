@@ -1,1 +1,8 @@
 build
+linux/*.cmd
+linux/*.ko
+linux/*.mod
+linux/*.mod.?
+*.o
+linux/modules.order
+linux/Module.symvers
