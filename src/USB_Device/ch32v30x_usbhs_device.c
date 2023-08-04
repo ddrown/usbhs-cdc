@@ -211,36 +211,20 @@ uint8_t USBHS_Endp_DataUp(uint8_t endp, uint8_t *pbuf, uint16_t len, uint8_t mod
     return 0;
 }
 
-/*********************************************************************
- * @fn      USBHS_IRQHandler
- *
- * @brief   This function handles USBHS exception.
- *
- * @return  none
- */
-__attribute__((used)) void USBHS_IRQHandler_real(void) {
-    uint8_t intflag, intst, errflag;
+void usb_token_in(uint8_t intst) {
     uint16_t len;
-    uint32_t baudrate;
 
-    intflag = USBHSD->INT_FG;
-    intst = USBHSD->INT_ST;
-
-    if (intflag & USBHS_UIF_TRANSFER) {
-        switch (intst & USBHS_UIS_TOKEN_MASK) {
-        /* data-in stage processing */
-        case USBHS_UIS_TOKEN_IN:
-            switch (intst & (USBHS_UIS_TOKEN_MASK | USBHS_UIS_ENDP_MASK)) {
-            /* end-point 0 data in interrupt */
-            case USBHS_UIS_TOKEN_IN | DEF_UEP0:
-                if (USBHS_SetupReqLen == 0) {
-                    USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;
-                }
-                if ((USBHS_SetupReqType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD) {
-                    /* Non-standard request endpoint 0 Data upload */
-                } else {
-                    /* Standard request endpoint 0 Data upload */
-                    switch (USBHS_SetupReqCode) {
+    switch (intst & (USBHS_UIS_TOKEN_MASK | USBHS_UIS_ENDP_MASK)) {
+        /* end-point 0 data in interrupt */
+        case USBHS_UIS_TOKEN_IN | DEF_UEP0:
+            if (USBHS_SetupReqLen == 0) {
+                USBHSD->UEP0_RX_CTRL = USBHS_UEP_R_TOG_DATA1 | USBHS_UEP_R_RES_ACK;
+            }
+            if ((USBHS_SetupReqType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD) {
+            /* Non-standard request endpoint 0 Data upload */
+            } else {
+                /* Standard request endpoint 0 Data upload */
+                switch (USBHS_SetupReqCode) {
                     case USB_GET_DESCRIPTOR:
                         len = USBHS_SetupReqLen >= DEF_USBD_UEP0_SIZE ? DEF_USBD_UEP0_SIZE : USBHS_SetupReqLen;
                         memcpy(USBHS_EP0_Buf, pUSBHS_Descr, len);
@@ -257,105 +241,372 @@ __attribute__((used)) void USBHS_IRQHandler_real(void) {
                     default:
                         USBHSD->UEP0_TX_LEN = 0;
                         break;
+                }
+            }
+            break;
+
+        /* end-point 1 data in interrupt */
+        case USBHS_UIS_TOKEN_IN | DEF_UEP2:
+            USBHSD->UEP2_TX_CTRL = (USBHSD->UEP2_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+            USBHSD->UEP2_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
+            USBHS_Endp_Busy[DEF_UEP2] &= ~DEF_UEP_BUSY;
+            Uart.USB_Up_IngFlag = 0x00;
+            break;
+
+        /* end-point 4 data in interrupt */
+        case USBHS_UIS_TOKEN_IN | DEF_UEP3:
+            USBHSD->UEP3_TX_CTRL = (USBHSD->UEP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
+            USBHSD->UEP3_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
+            USBHS_Endp_Busy[DEF_UEP3] &= ~DEF_UEP_BUSY;
+            break;
+
+        default:
+            break;
+    }
+}
+
+uint8_t usb_token_out(uint8_t intst) {
+    switch (intst & (USBHS_UIS_TOKEN_MASK | USBHS_UIS_ENDP_MASK)) {
+        /* end-point 0 data out interrupt */
+        case USBHS_UIS_TOKEN_OUT | DEF_UEP0:
+            // len = USBHSH->RX_LEN;
+            if (intst & USBHS_UIS_TOG_OK) {
+                /* if any processing about rx, set it here */
+                if ((USBHS_SetupReqType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD) {
+                    USBHS_SetupReqLen = 0;
+                    /* Non-standard request end-point 0 Data download */
+                    if (USBHS_SetupReqCode == CDC_SET_LINE_CODING) {
+                        /* Save relevant parameters such as serial port baud rate */
+                        /* The downlinked data is processed in the endpoint 0 OUT packet, the 7 bytes of the downlink are, in order
+                           4 bytes: baud rate value: lowest baud rate byte, next lowest baud rate byte, next highest baud rate byte, highest baud rate byte.
+                           1 byte: number of stop bits (0: 1 stop bit; 1: 1.5 stop bit; 2: 2 stop bits).
+                           1 byte: number of parity bits (0: None; 1: Odd; 2: Even; 3: Mark; 4: Space).
+                           1 byte: number of data bits (5,6,7,8,16); */
+                        Uart.Com_Cfg[0] = USBHS_EP0_Buf[0];
+                        Uart.Com_Cfg[1] = USBHS_EP0_Buf[1];
+                        Uart.Com_Cfg[2] = USBHS_EP0_Buf[2];
+                        Uart.Com_Cfg[3] = USBHS_EP0_Buf[3];
+                        Uart.Com_Cfg[4] = USBHS_EP0_Buf[4];
+                        Uart.Com_Cfg[5] = USBHS_EP0_Buf[5];
+                        Uart.Com_Cfg[6] = USBHS_EP0_Buf[6];
+
+                        /* Uart1 usb init */
+                        UART2_USB_Init();
                     }
+                } else {
+                    /* Standard request end-point 0 Data download */
+                }
+
+                if (USBHS_SetupReqLen == 0) {
+                    USBHSD->UEP0_TX_LEN = 0;
+                    USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_ACK;
+                }
+            }
+            break;
+
+            /* end-point 1 data out interrupt */
+        case USBHS_UIS_TOKEN_OUT | DEF_UEP2:
+            /* Endp download */
+            USBHSD->UEP2_RX_CTRL ^= USBHS_UEP_R_TOG_DATA1;
+
+            /* DMA address */
+            Uart.Tx_PackLen[Uart.Tx_LoadNum] = USBHSD->RX_LEN;
+            Uart.Tx_LoadNum++;
+            USBHSD->UEP2_RX_DMA = (uint32_t)(uint8_t *)&UART2_Tx_Buf[(Uart.Tx_LoadNum * DEF_USB_HS_PACK_LEN)];
+            if (Uart.Tx_LoadNum >= DEF_UARTx_TX_BUF_NUM_MAX) {
+                Uart.Tx_LoadNum = 0x00;
+                USBHSD->UEP2_RX_DMA = (uint32_t)(uint8_t *)&UART2_Tx_Buf[0];
+            }
+            Uart.Tx_RemainNum++;
+
+            /* Determine if the downlink needs to be paused */
+            if (Uart.Tx_RemainNum >= (DEF_UARTx_TX_BUF_NUM_MAX - 2)) {
+                USBHSD->UEP2_RX_CTRL &= ~USBHS_UEP_R_RES_MASK;
+                USBHSD->UEP2_RX_CTRL |= USBHS_UEP_R_RES_NAK;
+                Uart.USB_Down_StopFlag = 0x01;
+            }
+            break;
+
+        default:
+            return 0xFF;
+            break;
+    }
+
+    return 0;
+}
+
+uint8_t usb_clear_feature() {
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
+        /* clear one device feature */
+        if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == 0x01) {
+            /* clear usb sleep status, device not prepare to sleep */
+            USBHS_DevSleepStatus &= ~0x01;
+        } else {
+            return 0xFF;
+        }
+        return 0;
+    } 
+
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
+        /* Set End-point Feature */
+        if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_ENDP_HALT) {
+            /* Clear End-point Feature */
+            switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
+                case (DEF_UEP2 | DEF_UEP_IN):
+                    /* Set End-point 2 IN NAK */
+                    USBHSD->UEP2_TX_CTRL = USBHS_UEP_T_RES_NAK;
+                    break;
+
+                case (DEF_UEP2 | DEF_UEP_OUT):
+                    /* Set End-point 2 OUT ACK */
+                    USBHSD->UEP2_RX_CTRL = USBHS_UEP_R_RES_ACK;
+                    break;
+
+                case (DEF_UEP3 | DEF_UEP_IN):
+                    /* Set End-point 3 IN NAK */
+                    USBHSD->UEP3_TX_CTRL = USBHS_UEP_T_RES_NAK;
+                    break;
+
+                default:
+                    return 0xFF;
+                    break;
+            }
+
+            return 0;
+        }
+
+        return 0xFF;
+    }
+
+    return 0xFF;
+}
+
+uint8_t usb_set_feature() {
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
+        /* Set Device Feature */
+        if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_REMOTE_WAKEUP) {
+            if (MyCfgDescr_FS[7] & 0x20) {
+                /* Set Wake-up flag, device prepare to sleep */
+                USBHS_DevSleepStatus |= 0x01;
+            } else {
+                return 0xFF;
+            }
+        } else {
+            return 0xFF;
+        }
+
+        return 0;
+    } 
+
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
+        /* Set End-point Feature */
+        if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_ENDP_HALT) {
+            /* Set end-points status stall */
+            switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
+                case (DEF_UEP2 | DEF_UEP_IN):
+                    /* Set End-point 2 IN STALL */
+                    USBHSD->UEP2_TX_CTRL = (USBHSD->UEP2_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
+                    break;
+
+                case (DEF_UEP2 | DEF_UEP_OUT):
+                    /* Set End-point 2 OUT STALL */
+                    USBHSD->UEP2_RX_CTRL = (USBHSD->UEP2_RX_CTRL & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_STALL;
+                    break;
+
+                case (DEF_UEP3 | DEF_UEP_IN):
+                    /* Set End-point 3 IN STALL */
+                    USBHSD->UEP3_TX_CTRL = (USBHSD->UEP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
+                    break;
+
+                default:
+                    return 0xFF;
+                    break;
+            }
+        }
+    }
+
+    return 0;
+}
+
+uint8_t usb_get_status() {
+    USBHS_EP0_Buf[0] = 0x00;
+    USBHS_EP0_Buf[1] = 0x00;
+
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
+        switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
+            case (DEF_UEP2 | DEF_UEP_IN):
+                if (((USBHSD->UEP2_TX_CTRL) & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL) {
+                    USBHS_EP0_Buf[0] = 0x01;
                 }
                 break;
 
-            /* end-point 1 data in interrupt */
-            case USBHS_UIS_TOKEN_IN | DEF_UEP2:
-                USBHSD->UEP2_TX_CTRL = (USBHSD->UEP2_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
-                USBHSD->UEP2_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
-                USBHS_Endp_Busy[DEF_UEP2] &= ~DEF_UEP_BUSY;
-                Uart.USB_Up_IngFlag = 0x00;
+            case (DEF_UEP2 | DEF_UEP_OUT):
+                if (((USBHSD->UEP2_RX_CTRL) & USBHS_UEP_R_RES_MASK) == USBHS_UEP_R_RES_STALL) {
+                    USBHS_EP0_Buf[0] = 0x01;
+                }
                 break;
 
-            /* end-point 4 data in interrupt */
-            case USBHS_UIS_TOKEN_IN | DEF_UEP3:
-                USBHSD->UEP3_TX_CTRL = (USBHSD->UEP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
-                USBHSD->UEP3_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
-                USBHS_Endp_Busy[DEF_UEP3] &= ~DEF_UEP_BUSY;
+            case (DEF_UEP3 | DEF_UEP_IN):
+                if (((USBHSD->UEP3_TX_CTRL) & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL) {
+                    USBHS_EP0_Buf[0] = 0x01;
+                }
                 break;
 
             default:
+                return 0xFF;
                 break;
+        }
+        return 0;
+    }
+
+    if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
+        if (USBHS_DevSleepStatus & 0x01) {
+            USBHS_EP0_Buf[0] = 0x02;
+        }
+    }
+
+    if (USBHS_SetupReqLen > 2) {
+        USBHS_SetupReqLen = 2;
+    }
+
+    return 0;
+}
+
+uint8_t usb_get_descriptor(uint16_t *len) {
+    switch ((uint8_t)(USBHS_SetupReqValue >> 8)) {
+        /* get usb device descriptor */
+        case USB_DESCR_TYP_DEVICE:
+            pUSBHS_Descr = MyDevDescr;
+            *len = DEF_USBD_DEVICE_DESC_LEN;
+            break;
+
+            /* get usb configuration descriptor */
+        case USB_DESCR_TYP_CONFIG:
+            /* Query current usb speed */
+            if ((USBHSD->SPEED_TYPE & USBHS_SPEED_TYPE_MASK) == USBHS_SPEED_HIGH) {
+                /* High speed mode */
+                USBHS_DevSpeed = USBHS_SPEED_HIGH;
+                USBHS_DevMaxPackLen = DEF_USBD_HS_PACK_SIZE;
+            } else {
+                /* Full speed mode */
+                USBHS_DevSpeed = USBHS_SPEED_FULL;
+                USBHS_DevMaxPackLen = DEF_USBD_FS_PACK_SIZE;
             }
+
+            /* Load usb configuration descriptor by speed */
+            if (USBHS_DevSpeed == USBHS_SPEED_HIGH) {
+                /* High speed mode */
+                pUSBHS_Descr = MyCfgDescr_HS;
+                *len = DEF_USBD_CONFIG_HS_DESC_LEN;
+            } else {
+                /* Full speed mode */
+                pUSBHS_Descr = MyCfgDescr_FS;
+                *len = DEF_USBD_CONFIG_FS_DESC_LEN;
+            }
+            break;
+
+            /* get usb string descriptor */
+        case USB_DESCR_TYP_STRING:
+            switch ((uint8_t)(USBHS_SetupReqValue & 0xFF)) {
+                /* Descriptor 0, Language descriptor */
+                case DEF_STRING_DESC_LANG:
+                    pUSBHS_Descr = MyLangDescr;
+                    *len = DEF_USBD_LANG_DESC_LEN;
+                    break;
+
+                    /* Descriptor 1, Manufacturers String descriptor */
+                case DEF_STRING_DESC_MANU:
+                    pUSBHS_Descr = MyManuInfo;
+                    *len = DEF_USBD_MANU_DESC_LEN;
+                    break;
+
+                    /* Descriptor 2, Product String descriptor */
+                case DEF_STRING_DESC_PROD:
+                    pUSBHS_Descr = MyProdInfo;
+                    *len = DEF_USBD_PROD_DESC_LEN;
+                    break;
+
+                    /* Descriptor 3, Serial-number String descriptor */
+                case DEF_STRING_DESC_SERN:
+                    pUSBHS_Descr = MySerNumInfo;
+                    *len = DEF_USBD_SN_DESC_LEN;
+                    break;
+
+                default:
+                    return 0xFF;
+                    break;
+            }
+            break;
+
+            /* get usb device qualify descriptor */
+        case USB_DESCR_TYP_QUALIF:
+            pUSBHS_Descr = MyQuaDesc;
+            *len = DEF_USBD_QUALFY_DESC_LEN;
+            break;
+
+            /* get usb BOS descriptor */
+        case USB_DESCR_TYP_BOS:
+            /* USB 2.00 DO NOT support BOS descriptor */
+            return 0xFF;
+            break;
+
+            /* get usb other-speed descriptor */
+        case USB_DESCR_TYP_SPEED:
+            if (USBHS_DevSpeed == USBHS_SPEED_HIGH) {
+                /* High speed mode */
+                memcpy(&TAB_USB_HS_OSC_DESC[2], &MyCfgDescr_FS[2], DEF_USBD_CONFIG_FS_DESC_LEN - 2);
+                pUSBHS_Descr = (uint8_t *)&TAB_USB_HS_OSC_DESC[0];
+                *len = DEF_USBD_CONFIG_FS_DESC_LEN;
+            } else if (USBHS_DevSpeed == USBHS_SPEED_FULL) {
+                /* Full speed mode */
+                memcpy(&TAB_USB_FS_OSC_DESC[2], &MyCfgDescr_HS[2], DEF_USBD_CONFIG_HS_DESC_LEN - 2);
+                pUSBHS_Descr = (uint8_t *)&TAB_USB_FS_OSC_DESC[0];
+                *len = DEF_USBD_CONFIG_HS_DESC_LEN;
+            } else {
+                return 0xFF;
+            }
+            break;
+
+        default:
+            return 0xFF;
+            break;
+    }
+
+    /* Copy Descriptors to Endp0 DMA buffer */
+    if (USBHS_SetupReqLen > *len) {
+        USBHS_SetupReqLen = *len;
+    }
+    *len = (USBHS_SetupReqLen >= DEF_USBD_UEP0_SIZE) ? DEF_USBD_UEP0_SIZE : USBHS_SetupReqLen;
+    memcpy(USBHS_EP0_Buf, pUSBHS_Descr, *len);
+    pUSBHS_Descr += *len;
+
+    return 0;
+}
+
+/*********************************************************************
+ * @fn      USBHS_IRQHandler
+ *
+ * @brief   This function handles USBHS exception.
+ *
+ * @return  none
+ */
+__attribute__((used)) void USBHS_IRQHandler_real(void) {
+    uint8_t intflag, intst, errflag;
+    uint16_t len;
+
+    intflag = USBHSD->INT_FG;
+    intst = USBHSD->INT_ST;
+
+    if (intflag & USBHS_UIF_TRANSFER) {
+        switch (intst & USBHS_UIS_TOKEN_MASK) {
+        /* data-in stage processing */
+        case USBHS_UIS_TOKEN_IN:
+            usb_token_in(intst);
             break;
 
         /* data-out stage processing */
         case USBHS_UIS_TOKEN_OUT:
-            switch (intst & (USBHS_UIS_TOKEN_MASK | USBHS_UIS_ENDP_MASK)) {
-            /* end-point 0 data out interrupt */
-            case USBHS_UIS_TOKEN_OUT | DEF_UEP0:
-                len = USBHSH->RX_LEN;
-                if (intst & USBHS_UIS_TOG_OK) {
-                    /* if any processing about rx, set it here */
-                    if ((USBHS_SetupReqType & USB_REQ_TYP_MASK) != USB_REQ_TYP_STANDARD) {
-                        USBHS_SetupReqLen = 0;
-                        /* Non-standard request end-point 0 Data download */
-                        if (USBHS_SetupReqCode == CDC_SET_LINE_CODING) {
-                            /* Save relevant parameters such as serial port baud rate */
-                            /* The downlinked data is processed in the endpoint 0 OUT packet, the 7 bytes of the downlink are, in order
-                               4 bytes: baud rate value: lowest baud rate byte, next lowest baud rate byte, next highest baud rate byte, highest baud rate byte.
-                               1 byte: number of stop bits (0: 1 stop bit; 1: 1.5 stop bit; 2: 2 stop bits).
-                               1 byte: number of parity bits (0: None; 1: Odd; 2: Even; 3: Mark; 4: Space).
-                               1 byte: number of data bits (5,6,7,8,16); */
-                            Uart.Com_Cfg[0] = USBHS_EP0_Buf[0];
-                            Uart.Com_Cfg[1] = USBHS_EP0_Buf[1];
-                            Uart.Com_Cfg[2] = USBHS_EP0_Buf[2];
-                            Uart.Com_Cfg[3] = USBHS_EP0_Buf[3];
-                            Uart.Com_Cfg[4] = USBHS_EP0_Buf[4];
-                            Uart.Com_Cfg[5] = USBHS_EP0_Buf[5];
-                            Uart.Com_Cfg[6] = USBHS_EP0_Buf[6];
-                            Uart.Com_Cfg[7] = DEF_UARTx_RX_TIMEOUT;
-
-                            /* save bauds */
-                            baudrate = USBHS_EP0_Buf[0];
-                            baudrate += ((uint32_t)USBHS_EP0_Buf[1] << 8);
-                            baudrate += ((uint32_t)USBHS_EP0_Buf[2] << 16);
-                            baudrate += ((uint32_t)USBHS_EP0_Buf[3] << 24);
-                            Uart.Com_Cfg[7] = Uart.Rx_TimeOutMax;
-
-                            /* Uart1 usb init */
-                            UART2_USB_Init();
-                        }
-                    } else {
-                        /* Standard request end-point 0 Data download */
-                    }
-
-                    if (USBHS_SetupReqLen == 0) {
-                        USBHSD->UEP0_TX_LEN = 0;
-                        USBHSD->UEP0_TX_CTRL = USBHS_UEP_T_TOG_DATA1 | USBHS_UEP_T_RES_ACK;
-                    }
-                }
-                break;
-
-            /* end-point 1 data out interrupt */
-            case USBHS_UIS_TOKEN_OUT | DEF_UEP2:
-                /* Endp download */
-                USBHSD->UEP2_RX_CTRL ^= USBHS_UEP_R_TOG_DATA1;
-
-                /* DMA address */
-                Uart.Tx_PackLen[Uart.Tx_LoadNum] = USBHSD->RX_LEN;
-                Uart.Tx_LoadNum++;
-                USBHSD->UEP2_RX_DMA = (uint32_t)(uint8_t *)&UART2_Tx_Buf[(Uart.Tx_LoadNum * DEF_USB_HS_PACK_LEN)];
-                if (Uart.Tx_LoadNum >= DEF_UARTx_TX_BUF_NUM_MAX) {
-                    Uart.Tx_LoadNum = 0x00;
-                    USBHSD->UEP2_RX_DMA = (uint32_t)(uint8_t *)&UART2_Tx_Buf[0];
-                }
-                Uart.Tx_RemainNum++;
-
-                /* Determine if the downlink needs to be paused */
-                if (Uart.Tx_RemainNum >= (DEF_UARTx_TX_BUF_NUM_MAX - 2)) {
-                    USBHSD->UEP2_RX_CTRL &= ~USBHS_UEP_R_RES_MASK;
-                    USBHSD->UEP2_RX_CTRL |= USBHS_UEP_R_RES_NAK;
-                    Uart.USB_Down_StopFlag = 0x01;
-                }
-                break;
-
-            default:
-                errflag = 0xFF;
-                break;
-            }
+            errflag = errflag | usb_token_out(intst);
             break;
 
         /* Sof pack processing */
@@ -416,112 +667,7 @@ __attribute__((used)) void USBHS_IRQHandler_real(void) {
             switch (USBHS_SetupReqCode) {
             /* get device/configuration/string/report/... descriptors */
             case USB_GET_DESCRIPTOR:
-                switch ((uint8_t)(USBHS_SetupReqValue >> 8)) {
-                /* get usb device descriptor */
-                case USB_DESCR_TYP_DEVICE:
-                    pUSBHS_Descr = MyDevDescr;
-                    len = DEF_USBD_DEVICE_DESC_LEN;
-                    break;
-
-                /* get usb configuration descriptor */
-                case USB_DESCR_TYP_CONFIG:
-                    /* Query current usb speed */
-                    if ((USBHSD->SPEED_TYPE & USBHS_SPEED_TYPE_MASK) == USBHS_SPEED_HIGH) {
-                        /* High speed mode */
-                        USBHS_DevSpeed = USBHS_SPEED_HIGH;
-                        USBHS_DevMaxPackLen = DEF_USBD_HS_PACK_SIZE;
-                    } else {
-                        /* Full speed mode */
-                        USBHS_DevSpeed = USBHS_SPEED_FULL;
-                        USBHS_DevMaxPackLen = DEF_USBD_FS_PACK_SIZE;
-                    }
-
-                    /* Load usb configuration descriptor by speed */
-                    if (USBHS_DevSpeed == USBHS_SPEED_HIGH) {
-                        /* High speed mode */
-                        pUSBHS_Descr = MyCfgDescr_HS;
-                        len = DEF_USBD_CONFIG_HS_DESC_LEN;
-                    } else {
-                        /* Full speed mode */
-                        pUSBHS_Descr = MyCfgDescr_FS;
-                        len = DEF_USBD_CONFIG_FS_DESC_LEN;
-                    }
-                    break;
-
-                /* get usb string descriptor */
-                case USB_DESCR_TYP_STRING:
-                    switch ((uint8_t)(USBHS_SetupReqValue & 0xFF)) {
-                    /* Descriptor 0, Language descriptor */
-                    case DEF_STRING_DESC_LANG:
-                        pUSBHS_Descr = MyLangDescr;
-                        len = DEF_USBD_LANG_DESC_LEN;
-                        break;
-
-                    /* Descriptor 1, Manufacturers String descriptor */
-                    case DEF_STRING_DESC_MANU:
-                        pUSBHS_Descr = MyManuInfo;
-                        len = DEF_USBD_MANU_DESC_LEN;
-                        break;
-
-                    /* Descriptor 2, Product String descriptor */
-                    case DEF_STRING_DESC_PROD:
-                        pUSBHS_Descr = MyProdInfo;
-                        len = DEF_USBD_PROD_DESC_LEN;
-                        break;
-
-                    /* Descriptor 3, Serial-number String descriptor */
-                    case DEF_STRING_DESC_SERN:
-                        pUSBHS_Descr = MySerNumInfo;
-                        len = DEF_USBD_SN_DESC_LEN;
-                        break;
-
-                    default:
-                        errflag = 0xFF;
-                        break;
-                    }
-                    break;
-
-                /* get usb device qualify descriptor */
-                case USB_DESCR_TYP_QUALIF:
-                    pUSBHS_Descr = MyQuaDesc;
-                    len = DEF_USBD_QUALFY_DESC_LEN;
-                    break;
-
-                /* get usb BOS descriptor */
-                case USB_DESCR_TYP_BOS:
-                    /* USB 2.00 DO NOT support BOS descriptor */
-                    errflag = 0xFF;
-                    break;
-
-                /* get usb other-speed descriptor */
-                case USB_DESCR_TYP_SPEED:
-                    if (USBHS_DevSpeed == USBHS_SPEED_HIGH) {
-                        /* High speed mode */
-                        memcpy(&TAB_USB_HS_OSC_DESC[2], &MyCfgDescr_FS[2], DEF_USBD_CONFIG_FS_DESC_LEN - 2);
-                        pUSBHS_Descr = (uint8_t *)&TAB_USB_HS_OSC_DESC[0];
-                        len = DEF_USBD_CONFIG_FS_DESC_LEN;
-                    } else if (USBHS_DevSpeed == USBHS_SPEED_FULL) {
-                        /* Full speed mode */
-                        memcpy(&TAB_USB_FS_OSC_DESC[2], &MyCfgDescr_HS[2], DEF_USBD_CONFIG_HS_DESC_LEN - 2);
-                        pUSBHS_Descr = (uint8_t *)&TAB_USB_FS_OSC_DESC[0];
-                        len = DEF_USBD_CONFIG_HS_DESC_LEN;
-                    } else {
-                        errflag = 0xFF;
-                    }
-                    break;
-
-                default:
-                    errflag = 0xFF;
-                    break;
-                }
-
-                /* Copy Descriptors to Endp0 DMA buffer */
-                if (USBHS_SetupReqLen > len) {
-                    USBHS_SetupReqLen = len;
-                }
-                len = (USBHS_SetupReqLen >= DEF_USBD_UEP0_SIZE) ? DEF_USBD_UEP0_SIZE : USBHS_SetupReqLen;
-                memcpy(USBHS_EP0_Buf, pUSBHS_Descr, len);
-                pUSBHS_Descr += len;
+                errflag = errflag | usb_get_descriptor(&len);
                 break;
 
             /* Set usb address */
@@ -545,87 +691,12 @@ __attribute__((used)) void USBHS_IRQHandler_real(void) {
 
             /* Clear or disable one usb feature */
             case USB_CLEAR_FEATURE:
-                if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
-                    /* clear one device feature */
-                    if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == 0x01) {
-                        /* clear usb sleep status, device not prepare to sleep */
-                        USBHS_DevSleepStatus &= ~0x01;
-                    } else {
-                        errflag = 0xFF;
-                    }
-                } else if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
-                    /* Set End-point Feature */
-                    if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_ENDP_HALT) {
-                        /* Clear End-point Feature */
-                        switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
-                        case (DEF_UEP2 | DEF_UEP_IN):
-                            /* Set End-point 2 IN NAK */
-                            USBHSD->UEP2_TX_CTRL = USBHS_UEP_T_RES_NAK;
-                            break;
-
-                        case (DEF_UEP2 | DEF_UEP_OUT):
-                            /* Set End-point 2 OUT ACK */
-                            USBHSD->UEP2_RX_CTRL = USBHS_UEP_R_RES_ACK;
-                            break;
-
-                        case (DEF_UEP3 | DEF_UEP_IN):
-                            /* Set End-point 3 IN NAK */
-                            USBHSD->UEP3_TX_CTRL = USBHS_UEP_T_RES_NAK;
-                            break;
-
-                        default:
-                            errflag = 0xFF;
-                            break;
-                        }
-                    } else {
-                        errflag = 0xFF;
-                    }
-
-                } else {
-                    errflag = 0xFF;
-                }
+                errflag = errflag | usb_clear_feature();
                 break;
 
             /* set or enable one usb feature */
             case USB_SET_FEATURE:
-                if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
-                    /* Set Device Feature */
-                    if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_REMOTE_WAKEUP) {
-                        if (MyCfgDescr_FS[7] & 0x20) {
-                            /* Set Wake-up flag, device prepare to sleep */
-                            USBHS_DevSleepStatus |= 0x01;
-                        } else {
-                            errflag = 0xFF;
-                        }
-                    } else {
-                        errflag = 0xFF;
-                    }
-                } else if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
-                    /* Set End-point Feature */
-                    if ((uint8_t)(USBHS_SetupReqValue & 0xFF) == USB_REQ_FEAT_ENDP_HALT) {
-                        /* Set end-points status stall */
-                        switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
-                        case (DEF_UEP2 | DEF_UEP_IN):
-                            /* Set End-point 2 IN STALL */
-                            USBHSD->UEP2_TX_CTRL = (USBHSD->UEP2_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
-                            break;
-
-                        case (DEF_UEP2 | DEF_UEP_OUT):
-                            /* Set End-point 2 OUT STALL */
-                            USBHSD->UEP2_RX_CTRL = (USBHSD->UEP2_RX_CTRL & ~USBHS_UEP_R_RES_MASK) | USBHS_UEP_R_RES_STALL;
-                            break;
-
-                        case (DEF_UEP3 | DEF_UEP_IN):
-                            /* Set End-point 3 IN STALL */
-                            USBHSD->UEP3_TX_CTRL = (USBHSD->UEP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_STALL;
-                            break;
-
-                        default:
-                            errflag = 0xFF;
-                            break;
-                        }
-                    }
-                }
+                errflag = errflag | usb_set_feature();
                 break;
 
             /* This request allows the host to select another setting for the specified interface  */
@@ -641,41 +712,7 @@ __attribute__((used)) void USBHS_IRQHandler_real(void) {
 
             /* host get status of specified device/interface/end-points */
             case USB_GET_STATUS:
-                USBHS_EP0_Buf[0] = 0x00;
-                USBHS_EP0_Buf[1] = 0x00;
-                if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_ENDP) {
-                    switch ((uint8_t)(USBHS_SetupReqIndex & 0xFF)) {
-                    case (DEF_UEP2 | DEF_UEP_IN):
-                        if (((USBHSD->UEP2_TX_CTRL) & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL) {
-                            USBHS_EP0_Buf[0] = 0x01;
-                        }
-                        break;
-
-                    case (DEF_UEP2 | DEF_UEP_OUT):
-                        if (((USBHSD->UEP2_RX_CTRL) & USBHS_UEP_R_RES_MASK) == USBHS_UEP_R_RES_STALL) {
-                            USBHS_EP0_Buf[0] = 0x01;
-                        }
-                        break;
-
-                    case (DEF_UEP3 | DEF_UEP_IN):
-                        if (((USBHSD->UEP3_TX_CTRL) & USBHS_UEP_T_RES_MASK) == USBHS_UEP_T_RES_STALL) {
-                            USBHS_EP0_Buf[0] = 0x01;
-                        }
-                        break;
-
-                    default:
-                        errflag = 0xFF;
-                        break;
-                    }
-                } else if ((USBHS_SetupReqType & USB_REQ_RECIP_MASK) == USB_REQ_RECIP_DEVICE) {
-                    if (USBHS_DevSleepStatus & 0x01) {
-                        USBHS_EP0_Buf[0] = 0x02;
-                    }
-                }
-
-                if (USBHS_SetupReqLen > 2) {
-                    USBHS_SetupReqLen = 2;
-                }
+                errflag = errflag | usb_get_status();
                 break;
 
             default:
