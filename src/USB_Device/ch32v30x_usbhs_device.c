@@ -258,6 +258,8 @@ void usb_token_in(uint8_t intst) {
             USBHSD->UEP3_TX_CTRL = (USBHSD->UEP3_TX_CTRL & ~USBHS_UEP_T_RES_MASK) | USBHS_UEP_T_RES_NAK;
             USBHSD->UEP3_TX_CTRL ^= USBHS_UEP_T_TOG_DATA1;
             USBHS_Endp_Busy[DEF_UEP3] &= ~DEF_UEP_BUSY;
+            Uart.USB_Int_UpFlag = 0x00;
+            Uart.USB_Int_Timestamp = (TIM2->CNT) << 16 | TIM1->CNT;
             break;
 
         default:

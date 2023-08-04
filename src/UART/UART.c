@@ -189,6 +189,7 @@ void UART2_ParaInit( uint8_t mode ) {
 
     Uart.USB_Up_IngFlag = 0x00;
     Uart.USB_Up_TimeOut = 0x00;
+    Uart.USB_Int_UpFlag = 0x00;
     Uart.USB_Up_Pack0_Flag = 0x00;
     Uart.USB_Down_StopFlag = 0x00;
     UARTx_Rx_DMACurCount = 0x00;
@@ -385,27 +386,86 @@ void write_usb_data(uint32_t buf, uint16_t len) {
     NVIC_EnableIRQ( USBHS_IRQn );
 }
 
+void dcd_changed(int carrier) {
+    static struct usb_cdc_notification {
+        uint8_t bmRequestType;
+        uint8_t bNotificationType;
+        uint16_t wValue;
+        uint16_t wIndex;
+        uint16_t wLength;
+        uint16_t data;
+    } __attribute__((packed)) serial_state;
+
+    serial_state.bmRequestType = USB_REQ_TYP_CLASS | USB_REQ_TYP_READ | USB_REQ_RECIP_INTERF;
+    serial_state.bNotificationType = 0x20;
+    serial_state.wValue = 0;
+    serial_state.wIndex = 0;
+    serial_state.wLength = 2;
+    serial_state.data = carrier ? 1 : 0;
+
+    NVIC_DisableIRQ( USBHS_IRQn );
+    NVIC_DisableIRQ( USBHS_IRQn );
+    USBHSD->UEP3_TX_DMA = (uint32_t)&serial_state;
+    USBHSD->UEP3_TX_LEN = sizeof(serial_state);
+    USBHSD->UEP3_TX_CTRL &= ~USBHS_UEP_T_RES_MASK;
+    USBHSD->UEP3_TX_CTRL |= USBHS_UEP_T_RES_ACK;
+    Uart.USB_Int_UpFlag = 0x01;
+    Uart.USB_Int_Timestamp = 0;
+    NVIC_EnableIRQ( USBHS_IRQn );
+}
+
 static uint8_t at_newline = 0;
 static char pps_stats[DEF_USBD_HS_PACK_SIZE];
+static uint16_t dcd_output_tim2 = 0;
 void check_pps_output() {
     static uint32_t last_count = 0;
 
-    if( Uart.USB_Up_IngFlag == 0 && pendingPPS && at_newline) {
-        uint16_t irq_ch1 = cap_count % 0x10000;
-        int32_t difference = irq_ch1-cap_ch1;
-        uint32_t longcount;
+    switch (pendingPPS) {
+    case 0:
+        break;
 
-        // did tim1 wrap between capture and irq?
-        if (difference < 0)
-            difference += 0x10000;
+    case 1: // TODO: how does this handle the endpoint not being polled
+        if (Uart.USB_Up_IngFlag == 0 && at_newline) {
+            uint16_t irq_ch1 = cap_count % 0x10000;
+            int32_t difference = irq_ch1 - cap_ch1;
+            uint32_t longcount;
 
-        longcount = cap_count - difference;
+            // did tim1 wrap between capture and irq?
+            if (difference < 0)
+                difference += 0x10000;
 
-        snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "m=%u cm=%u c1=%u cL=%u d=%u\r\n", micros, cap_micros, cap_ch1, longcount, longcount - last_count);
-        write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
+            longcount = cap_count - difference;
 
+            snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "m=%u cm=%u c1=%u cL=%u d=%u\r\n", micros, cap_micros, cap_ch1, longcount, longcount - last_count);
+            write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
+            dcd_changed(1);
+            dcd_output_tim2 = TIM2->CNT;
+
+            last_count = longcount;
+            pendingPPS = 2;
+        }
+        break;
+
+    case 2:
+        if (Uart.USB_Int_UpFlag == 0x00 && Uart.USB_Up_IngFlag == 0 && at_newline) {
+            // TODO: detect TIM2 wraps
+            snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "irq=%u\r\n", Uart.USB_Int_Timestamp);
+            write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
+            pendingPPS = 3;
+        }
+        // TODO: timeout
+        break;
+
+    case 3:
+        if ((uint16_t)(TIM2->CNT - dcd_output_tim2) > 219) { // about 100ms
+            dcd_changed(0);
+            pendingPPS = 0;
+        }
+        break;
+
+    default:
         pendingPPS = 0;
-        last_count = longcount;
+        break;
     }
 }
 

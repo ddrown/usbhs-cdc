@@ -73,7 +73,7 @@ typedef struct __attribute__((packed)) _UART_CTL
     uint8_t  Com_Cfg[ 8 ];                                                       /* Serial x parameter configuration (default baud rate is 115200, 1 stop bit, no parity, 8 data bits) */
     uint8_t  Recv3;
     uint8_t  USB_Int_UpFlag;                                                     /* Serial x interrupt upload status */
-    uint16_t USB_Int_UpTimeCount;                                                /* Serial x interrupt upload timing */
+    uint32_t USB_Int_Timestamp;                                                  /* Serial x interrupt upload timing */
 }UART_CTL, *PUART_CTL;
 
 /***********************************************************************************************************************/
