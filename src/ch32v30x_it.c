@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include "ch32v30x_it.h"
 #include "UART.h"
+#include "timer.h"
 
 __attribute__((naked)) void TIM7_IRQHandler() {
     __asm volatile ("call TIM7_IRQHandler_real; mret");
@@ -44,7 +45,7 @@ volatile uint16_t cap_ch1 = 0;
 volatile uint32_t cap_micros = 0, cap_count = 0;
 void TIM1_CC_IRQHandler_real(void) {
   if( TIM_GetITStatus( TIM1, TIM_IT_CC1 ) != RESET ) {
-    cap_count = (TIM2->CNT << 16) | TIM1->CNT;
+    cap_count = get_counters();
     cap_micros = micros;
     cap_ch1 = TIM_GetCapture1( TIM1 );
     pendingPPS = 1;

@@ -62,3 +62,22 @@ void TIM1_Init() {
     TIM_Cmd(TIM1, ENABLE );
     TIM_Cmd(TIM2, ENABLE);
 }
+
+uint32_t get_counters() {
+  uint16_t tim2_before, tim1, tim2_after;
+
+  tim2_before = TIM2->CNT;
+  tim1 = TIM1->CNT;
+  tim2_after = TIM2->CNT;
+
+  // did tim1 wrap around?
+  if(tim2_before != tim2_after) {
+    if(tim1 > 60000) {
+      // assumption: tim1 wrapped around after we read it
+      // allow for ~5000 cycles between before/after, hopefully enough for interrupts
+      tim2_after = tim2_before;
+    }
+  }
+
+  return ((uint32_t)tim2_after << 16) | tim1;
+}
