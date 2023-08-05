@@ -426,22 +426,20 @@ void check_pps_output() {
 
     case 1: // TODO: how does this handle the endpoint not being polled
         if (Uart.USB_Up_IngFlag == 0 && at_newline) {
-            uint16_t irq_ch1 = cap_count % 0x10000;
-            int32_t difference = irq_ch1 - cap_ch1;
-            uint32_t longcount;
+            uint16_t irq_ch1;
+            int32_t difference;
+
+            irq_ch1 = cap_count % 0x10000;
+            difference = irq_ch1 - cap_ch1;
 
             // did tim1 wrap between capture and irq?
             if (difference < 0)
                 difference += 0x10000;
 
-            longcount = cap_count - difference;
-
-            snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "m=%u cm=%u c1=%u cL=%u d=%u\r\n", micros, cap_micros, cap_ch1, longcount, longcount - last_count);
-            write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
             dcd_changed(1);
             dcd_output_tim2 = TIM2->CNT;
 
-            last_count = longcount;
+            last_count = cap_count - difference;
             pendingPPS = 2;
         }
         break;
@@ -449,7 +447,7 @@ void check_pps_output() {
     case 2:
         if (Uart.USB_Int_UpFlag == 0x00 && Uart.USB_Up_IngFlag == 0 && at_newline) {
             // TODO: detect TIM2 wraps
-            snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "irq=%u\r\n", Uart.USB_Int_Timestamp);
+            snprintf(pps_stats, DEF_USBD_HS_PACK_SIZE, "irq=%u cap=%u\r\n", Uart.USB_Int_Timestamp, last_count);
             write_usb_data((uint32_t)pps_stats, strlen(pps_stats));
             pendingPPS = 3;
         }
