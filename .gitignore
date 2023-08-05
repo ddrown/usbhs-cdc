@@ -6,3 +6,4 @@ linux/*.mod.?
 *.o
 linux/modules.order
 linux/Module.symvers
+venv

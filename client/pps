@@ -1,0 +1,75 @@
+#!venv/bin/python3
+
+import serial
+import re
+from decimal import getcontext, Decimal, ROUND_FLOOR
+from time import time
+import argparse
+import socket
+import struct
+
+def get_last_pps(pps_device):
+    with open(f"/sys/class/pps/{pps_device}/assert", encoding="utf-8") as f:
+        ppstime = f.read().replace("\n", "").split("#")
+    return [Decimal(ppstime[0]), ppstime[1]]
+
+def add_chrony(chrony, now, offset_adjusted):
+    sec = now.to_integral_exact(rounding=ROUND_FLOOR)
+    usec = ((now - sec) * 1000000).to_integral_exact()
+    sample = struct.pack("=QQdiiii", int(sec), int(usec), offset_adjusted, 1, 0, 0, 0x534f434b)
+    chrony.send(sample)
+
+def read_serial(port, pps_device, chrony):
+    nanosecond = Decimal("0.000000001")
+    last_lock = None
+    last_ppscount = None
+    while True:
+        line = port.readline().decode("utf-8").replace("\n", "")
+
+        m = re.search("^irq=(\d+) cap=(\d+)", line)
+        if m:
+            ppstime = get_last_pps(pps_device)
+            now = ppstime[0]
+            counter = ppstime[1]
+            if counter == last_ppscount:
+                print(f"pps counter repeat - race condition? {counter}")
+            last_ppscount = counter
+
+            usb_counter = Decimal(m.group(1))
+            cap_counter = Decimal(m.group(2))
+
+            delay = (usb_counter - cap_counter)
+            if usb_counter < cap_counter: # counter wrapped
+                delay = delay + 2**32
+            delay = (delay / Decimal(144000000)).quantize(nanosecond)
+
+            offset = now - now.to_integral_exact()
+            offset_adjusted = (offset - delay).quantize(nanosecond)
+
+            print(f"{now} {offset} {delay} {offset_adjusted} {usb_counter} {cap_counter}")
+            add_chrony(chrony, now, offset_adjusted)
+
+        m = re.search("^\\$GPGSA", line)
+        if m:
+            stats = line.split(",")
+            if stats[2] != last_lock:
+                last_lock = stats[2]
+                print(f"{time()} gps lock {stats[2]}")
+
+if __name__ == "__main__":
+    # 10 digits of seconds, 9 digits of fractional seconds
+    getcontext().prec = 19
+
+    parser = argparse.ArgumentParser(description="adjust PPS samples for USB transmission delay")
+    parser.add_argument("port", help="USB serial port, ex: /dev/ttyACM0")
+    parser.add_argument("pps", help="pps device, ex: pps1")
+    parser.add_argument("socket", help="chrony unix socket, ex: /var/run/chrony/chrony.ttyACM1.sock")
+    parser.add_argument("--baud", help="serial baud, default 9600", default=9600, type=int)
+    args = parser.parse_args()
+
+    port = serial.Serial(args.port, args.baud, timeout=2)
+
+    chrony = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    chrony.connect(args.socket)
+
+    read_serial(port, args.pps, chrony)
