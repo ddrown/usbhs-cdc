@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 #include "UART.h"
-#include "ch32v30x_it.h"
+#include "interrupt.h"
 
 /*******************************************************************************/
 /* Variable Definition */

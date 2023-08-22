@@ -10,7 +10,7 @@
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 #include <stdint.h>
-#include "ch32v30x_it.h"
+#include "interrupt.h"
 #include "UART.h"
 #include "timer.h"
 
